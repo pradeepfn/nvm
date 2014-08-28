@@ -7,14 +7,16 @@
 
 int main(int argc, char *argv[]){
     printf("Hello World\n");
-	map_memory_file();
 	int i;
     if(is_chkpoint_present()){
 		printf("Chekpoint present\n");
+		map_memory_file();
 		// do checkpoint recover routines
 		i = rtrv_last_state();
 	}else{
         // start from the begining
+		init();
+		map_memory_file();
 		printf("Starting from begining\n");
 		i = 0; 
 	}
