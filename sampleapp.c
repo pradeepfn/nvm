@@ -23,7 +23,8 @@ int main(int argc, char *argv[]){
 	for(;i<LOOP_COUNT;i++){
 		printf("loop value : %d\n", i);	
 		if(i%10 == 0){
-			checkpoint(i);
+			char str[]= "Hello world";
+			checkpoint(i,123,sizeof(str),str);
 		}
 		sleep(SLEEP_DELAY);
 	}
