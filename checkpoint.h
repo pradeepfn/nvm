@@ -15,7 +15,7 @@ typedef struct checkpoint{
 }checkpoint_t;
 
 
-bool is_chkpoint_present();
+int is_chkpoint_present();
 void map_memory_file();
 void init();
 checkpoint_t *get_meta(void *base_addr,size_t offset);
