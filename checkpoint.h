@@ -14,6 +14,28 @@ typedef struct checkpoint{
 	size_t offset;
 }checkpoint_t;
 
+typedef struct headmeta{
+	int offset;
+	timeval timestamp;
+}headmeta_t;
+
+typedef struct memmap{
+	void *file;
+	headmeta_t *head;
+	checkpoint_t *meta;
+	int fd;
+}memmap_t;
+
+LIST_HEAD(listhead, entry) head=
+	LIST_HEAD_INITIALIZER(head);
+struct listhead *headp;                 
+struct entry {
+    void *ptr;
+	size_t size;
+	int id;
+	int version;
+    LIST_ENTRY(entry) entries;
+};
 
 int is_chkpoint_present();
 void map_memory_file();

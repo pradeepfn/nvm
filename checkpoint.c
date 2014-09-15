@@ -9,29 +9,13 @@
 #include "checkpoint.h"
 
 
-#define FILE_PATH "foo"
+#define FILE_PATH_ONE "mmap.file.one"
+#define FILE_PATH_TWO "mmap.file.two"
 #define FILE_SIZE 500000000
 
-// variables
-void *file_memory;
-void *int_memory;
-void *meta_memory;
-int fd;
+memmap_t m[2];
+memmap_t *current;
 int offset;
-
-
-LIST_HEAD(listhead, entry) head=
-	LIST_HEAD_INITIALIZER(head);
-struct listhead *headp;                 
-struct entry {
-    void *ptr;
-	size_t size;
-	int id;
-	int version;
-    LIST_ENTRY(entry) entries;
-};
-	
-
 
 /*
 create the initial memory mapped file structure for the first time
@@ -39,27 +23,59 @@ and initialize the meta structure.
 */
 void init(){
 	LIST_INIT(&head);
-    // create a file
-    fd = open (FILE_PATH, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-    //dummy write to file makes it big enough
-    lseek (fd, FILE_SIZE, SEEK_SET);
-    write (fd, "", 1); 
-    lseek (fd, 0, SEEK_SET);
-    file_memory = mmap (0,FILE_SIZE, PROT_WRITE, MAP_SHARED, fd, 0);
-	int_memory = file_memory;
-	meta_memory =((int *)file_memory)+1;
+	//initializing two mem map files and structures pointing to them
+	char file1[] = FILE_PATH_ONE;
+	char file2[] = FILE_PATH_TWO;
+	mmap_file(&m[0],file1);
+	mmap_file(&m[1],file2);
 	if(!is_chkpoint_present()){
-		//initialize the memory
 		printf("first run of the program.... no prior checkpointed data!");
-		offset = -1;
-		memcpy(int_memory,&offset,sizeof(int));
+		//initialize the head meta structure of the mem map
+		copy_head_to_mem(&m[1]);
+		copy_head_to_mem(&m0[]);
+		current = &m[0]; // head meata directly operate on map file memory
 		FILE *file = fopen("nvm.lck","w+");
 		fclose(file);
 	}else{
-		offset =  *((int*)int_memory); 
+		// after a restart we find latest map file to operate on
+		current = get_latest_mapfile(&m1,&m2);	 
 	}
-    close (fd);
 }
+
+void mmap_files(memmap_t *m, const char *file_name){
+    m->fd = open (*file_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    lseek (m->fd, FILE_SIZE, SEEK_SET);
+    write (m->fd, "", 1); 
+    lseek (m->fd, 0, SEEK_SET);
+    m->file = mmap (0,FILE_SIZE, PROT_WRITE, MAP_SHARED, m->fd, 0);
+	m->head = m->file;
+	m->meta =((headmeta *)m->file)+1;
+    close (m->fd);
+}
+//copy the init head metadata portion to memory map
+void copy_head_to_mem(memmap_t *m){
+	headmeta_t head;
+	head.offset = -1;
+	gettimeofday(&(head.timestamp),NULL);
+	memcpy(m->head,&head,sizeof(headmeta_t));
+}
+
+memmap_t *get_latest_mapfile(memmap_t *m1,memmap_t *m2){
+	//first check the time stamps of the head values
+	headmeta_t *h1 = m1->head;
+	headmeta_t *h2 = m2->head;
+	timeval result;
+	//Return 1 if the difference is negative, otherwise 0.
+	if(!timeval_subtract(&result, m1, m2) && (h1->offset !=-1)){ 
+		return m1;	
+	}else if(h2->offset != -1){
+		return m2;
+	}elsei{
+		printf("Wrong program execution path...");
+		assert(0);
+	}
+}
+
 int initialized = 0;
 void *alloc(size_t size, char *var, int id, size_t commit_size){
 	//init calls happens once
@@ -92,16 +108,19 @@ int is_chkpoint_present(){
 
 
 extern checkpoint_t *get_latest_version(int id){
-	//first restore the global counter
-	offset = *((int *)int_memory);
-	checkpoint_t * current = get_meta(meta_memory,offset);
-	return get_latest_version1(meta_memory, current,id);
+	checkpoint_t *result;
+	if((result = get_latest_version1(current->meta, id)) == NULL){
+		//if result not found in the current mem map file, then switch the files
+		// and do search again
+		current = (current == &m[0])?&m[1]:&m[0];	
+		result = get_latest_version1()	
+	}
+	return result;	
 }
 
-checkpoint_t *get_latest_version1(void *base_addr, checkpoint_t *head, int id){
-	checkpoint_t *current = head;
-	int temp_offset = offset;
-	while(offset >= 0){
+checkpoint_t *get_latest_version1(void *base_addr, int id){
+	int temp_offset = current->head->offset;
+	while(temp_offset >= 0){
 		checkpoint_t *ptr = get_meta(base_addr,temp_offset);
 		if((ptr->id) == id){
 			return ptr;
@@ -112,8 +131,22 @@ checkpoint_t *get_latest_version1(void *base_addr, checkpoint_t *head, int id){
 
 }
 
+int is_remaining_space_enough(){
+	size_t tot_size=0;
+	struct entry *np;
+	for (np = head.lh_first; np != NULL; np = np->entries.le_next){
+		tot_size+=(sizeof(checkpoint_t)+np->size);	
+	}	
+	size_t remain_size = FILE_SIZE - (sizeof(headmeta_t) + current->head->offset);
+	return (remain_size > tot_size); 
+}
+
 
 extern void chkpt_all(){
+	if(!is_remaining_space_enough()){
+		//swap the persistant memory if not enough space
+		current = (current == &m[0])?&m[1]:&m[0];	
+	}
 	struct entry *np;
 	for (np = head.lh_first; np != NULL; np = np->entries.le_next){
 		checkpoint(np->id, np->version,	np->size,np->ptr);
@@ -121,7 +154,10 @@ extern void chkpt_all(){
 	return;
 }
 
-
+/*
+	try checkpointing to current mem map file if space is not enough
+	switch to next mem map file and do checkpointing.
+*/
 extern void checkpoint(int id, int version, size_t size, void *data){
 	checkpoint2(meta_memory,offset,id,version,size,data);
 	return;	
