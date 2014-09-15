@@ -4,9 +4,12 @@
 #include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/types.h>
+#include <sys/time.h>
 #include <sys/queue.h>
 #include <unistd.h>
+#include <assert.h>
 #include "checkpoint.h"
+#include "utils.h"
 
 
 #define FILE_PATH_ONE "mmap.file.one"
@@ -26,30 +29,30 @@ void init(){
 	//initializing two mem map files and structures pointing to them
 	char file1[] = FILE_PATH_ONE;
 	char file2[] = FILE_PATH_TWO;
-	mmap_file(&m[0],file1);
-	mmap_file(&m[1],file2);
+	mmap_files(&m[0],file1);
+	mmap_files(&m[1],file2);
 	if(!is_chkpoint_present()){
 		printf("first run of the program.... no prior checkpointed data!");
 		//initialize the head meta structure of the mem map
 		copy_head_to_mem(&m[1]);
-		copy_head_to_mem(&m0[]);
+		copy_head_to_mem(&m[0]);
 		current = &m[0]; // head meata directly operate on map file memory
 		FILE *file = fopen("nvm.lck","w+");
 		fclose(file);
 	}else{
 		// after a restart we find latest map file to operate on
-		current = get_latest_mapfile(&m1,&m2);	 
+		current = get_latest_mapfile(&m[0],&m[2]);	 
 	}
 }
 
 void mmap_files(memmap_t *m, const char *file_name){
-    m->fd = open (*file_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    m->fd = open (file_name, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
     lseek (m->fd, FILE_SIZE, SEEK_SET);
     write (m->fd, "", 1); 
     lseek (m->fd, 0, SEEK_SET);
     m->file = mmap (0,FILE_SIZE, PROT_WRITE, MAP_SHARED, m->fd, 0);
 	m->head = m->file;
-	m->meta =((headmeta *)m->file)+1;
+	m->meta =(checkpoint_t *)((headmeta_t *)m->file)+1;
     close (m->fd);
 }
 //copy the init head metadata portion to memory map
@@ -64,13 +67,13 @@ memmap_t *get_latest_mapfile(memmap_t *m1,memmap_t *m2){
 	//first check the time stamps of the head values
 	headmeta_t *h1 = m1->head;
 	headmeta_t *h2 = m2->head;
-	timeval result;
+	struct timeval result;
 	//Return 1 if the difference is negative, otherwise 0.
-	if(!timeval_subtract(&result, m1, m2) && (h1->offset !=-1)){ 
+	if(!timeval_subtract(&result, &(h1->timestamp),&(h2->timestamp)) && (h1->offset !=-1)){ 
 		return m1;	
 	}else if(h2->offset != -1){
 		return m2;
-	}elsei{
+	}else{
 		printf("Wrong program execution path...");
 		assert(0);
 	}
@@ -113,7 +116,7 @@ extern checkpoint_t *get_latest_version(int id){
 		//if result not found in the current mem map file, then switch the files
 		// and do search again
 		current = (current == &m[0])?&m[1]:&m[0];	
-		result = get_latest_version1()	
+		result = get_latest_version1(current->meta, id);	
 	}
 	return result;	
 }
@@ -128,7 +131,6 @@ checkpoint_t *get_latest_version1(void *base_addr, int id){
 		temp_offset = ptr->prv_offset;
 	}
 	return NULL;//to-do, handle exception cases
-
 }
 
 int is_remaining_space_enough(){
@@ -159,7 +161,7 @@ extern void chkpt_all(){
 	switch to next mem map file and do checkpointing.
 */
 extern void checkpoint(int id, int version, size_t size, void *data){
-	checkpoint2(meta_memory,offset,id,version,size,data);
+	checkpoint2(current->meta,offset,id,version,size,data);
 	return;	
 }
 
@@ -175,7 +177,7 @@ void checkpoint2(void *base_addr, size_t last_meta_offset, int id, int version, 
 		chkpt.prv_offset = last_meta_offset;
 		chkpt.offset = last_meta->offset + sizeof(checkpoint_t)+last_meta->data_size;
 	}else{
-		start_addr = meta_memory;
+		start_addr = current->meta;
 		chkpt.prv_offset = -1;
 		chkpt.offset = 0;
 	}
@@ -191,8 +193,8 @@ void checkpoint1(void *start_addr, checkpoint_t *chkpt, void *data){
 	//copy the actual value after metadata.
 	void *data_offset = ((char *)start_addr)+sizeof(checkpoint_t); 
 	memcpy(data_offset,data,chkpt->data_size);
-	offset = chkpt->offset;
-	memcpy((int *) int_memory, &offset, sizeof(int));
+	//directly operating on the mapped memory
+	current->head->offset = chkpt->offset;
 	return;
 }        
 

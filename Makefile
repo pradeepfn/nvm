@@ -1,12 +1,15 @@
-CC = gcc
-CFLAGS = -Wall
+CC=gcc
+CFLAGS=-I.  -Wall
+DEPS = checkpoint.h utils.h
+OBJ = checkpoint.o utils.o 
 
-TARGET = checkpoint
+%.o: %.c $(DEPS)
+	$(CC) -c -o $@ $< $(CFLAGS)
 
-all : $(TARGET)
+checkpoint: $(OBJ)
+	gcc -o $@ $^ $(CFLAGS)
 
-$(TARGET) : checkpoint.c checkpoint.h
-	$(CC) $(CFLAGS) -g -o $(TARGET)  checkpoint.h checkpoint.c
+all : checkpoint
 
 clean :
-	rm $(TARGET)
+	rm checkpoint *.o
