@@ -14,7 +14,8 @@
 
 #define FILE_PATH_ONE "mmap.file.one"
 #define FILE_PATH_TWO "mmap.file.two"
-#define FILE_SIZE 500000000
+#define FILE_SIZE 300
+/*#define FILE_SIZE 500000000*/
 
 memmap_t m[2];
 memmap_t *current;
@@ -32,16 +33,18 @@ void init(){
 	mmap_files(&m[0],file1);
 	mmap_files(&m[1],file2);
 	if(!is_chkpoint_present()){
-		printf("first run of the program.... no prior checkpointed data!");
+		printf("first run of the program.... no prior checkpointed data!\n");
 		//initialize the head meta structure of the mem map
-		copy_head_to_mem(&m[1]);
-		copy_head_to_mem(&m[0]);
+		copy_head_to_mem(&m[1],1);
+		copy_head_to_mem(&m[0],0);
 		current = &m[0]; // head meata directly operate on map file memory
+		printf("current map file is : %d \n", current->head->id);
 		FILE *file = fopen("nvm.lck","w+");
 		fclose(file);
 	}else{
 		// after a restart we find latest map file to operate on
-		current = get_latest_mapfile(&m[0],&m[2]);	 
+		current = get_latest_mapfile(&m[0],&m[1]);	 
+		printf("current map file is : %d \n", current->head->id);
 	}
 }
 
@@ -56,8 +59,9 @@ void mmap_files(memmap_t *m, const char *file_name){
     close (m->fd);
 }
 //copy the init head metadata portion to memory map
-void copy_head_to_mem(memmap_t *m){
+void copy_head_to_mem(memmap_t *m, int fileId){
 	headmeta_t head;
+	head.id = fileId;
 	head.offset = -1;
 	gettimeofday(&(head.timestamp),NULL);
 	memcpy(m->head,&head,sizeof(headmeta_t));
@@ -80,7 +84,7 @@ memmap_t *get_latest_mapfile(memmap_t *m1,memmap_t *m2){
 }
 
 int initialized = 0;
-void *alloc(size_t size, char *var, int id, size_t commit_size){
+void *alloc(size_t size, char *var, int id, int process_id, size_t commit_size){
 	//init calls happens once
 	if(!initialized){	
 		init();
@@ -90,6 +94,7 @@ void *alloc(size_t size, char *var, int id, size_t commit_size){
 		n->ptr = malloc(size); // allocating memory for incoming request
 		n->size = size;
 		n->id = id;
+		n->process_id = process_id;
 		n->version = 0;
 		LIST_INSERT_HEAD(&head, n, entries);
 		return n->ptr;
@@ -112,19 +117,21 @@ int is_chkpoint_present(){
 
 extern checkpoint_t *get_latest_version(int id){
 	checkpoint_t *result;
-	if((result = get_latest_version1(current->meta, id)) == NULL){
+	memmap_t *other;
+	if((result = get_latest_version1(current, id)) == NULL){
 		//if result not found in the current mem map file, then switch the files
 		// and do search again
-		current = (current == &m[0])?&m[1]:&m[0];	
-		result = get_latest_version1(current->meta, id);	
+		printf("Not found in the current memory mapped file. Searching the other...\n");
+		other = (current == &m[0])?&m[1]:&m[0];	
+		result = get_latest_version1(other, id);	
 	}
 	return result;	
 }
 
-checkpoint_t *get_latest_version1(void *base_addr, int id){
-	int temp_offset = current->head->offset;
+checkpoint_t *get_latest_version1(memmap_t *mmap, int id){
+	int temp_offset = mmap->head->offset;
 	while(temp_offset >= 0){
-		checkpoint_t *ptr = get_meta(base_addr,temp_offset);
+		checkpoint_t *ptr = get_meta(mmap->meta,temp_offset);
 		if((ptr->id) == id){
 			return ptr;
 		}
@@ -146,12 +153,17 @@ int is_remaining_space_enough(){
 
 extern void chkpt_all(){
 	if(!is_remaining_space_enough()){
+		printf("remaining space is not enough. Switching to other file....\n");
 		//swap the persistant memory if not enough space
+		printf("current map file is : %d \n", current->head->id);
 		current = (current == &m[0])?&m[1]:&m[0];	
+		current->head->offset = -1; // invalidate the data
+		gettimeofday(&(current->head->timestamp),NULL); // setting the timestamp
+		printf("current map file after switch is : %d \n", current->head->id);
 	}
 	struct entry *np;
 	for (np = head.lh_first; np != NULL; np = np->entries.le_next){
-		checkpoint(np->id, np->version,	np->size,np->ptr);
+		checkpoint(np->id, np->process_id, np->version,	np->size,np->ptr);
 	}	
 	return;
 }
@@ -160,21 +172,22 @@ extern void chkpt_all(){
 	try checkpointing to current mem map file if space is not enough
 	switch to next mem map file and do checkpointing.
 */
-extern void checkpoint(int id, int version, size_t size, void *data){
-	checkpoint2(current->meta,offset,id,version,size,data);
+extern void checkpoint(int id, int process_id, int version, size_t size, void *data){
+	checkpoint2(current->meta,id, process_id, version,size,data);
 	return;	
 }
 
-void checkpoint2(void *base_addr, size_t last_meta_offset, int id, int version, size_t size, void *data){
+void checkpoint2(void *base_addr, int id, int process_id, int version, size_t size, void *data){
 	checkpoint_t chkpt;
 	void *start_addr;
 	chkpt.id = id;
+	chkpt.process_id = process_id;
 	chkpt.version = version;
 	chkpt.data_size = size;
-	if(offset != -1 ){
-		checkpoint_t *last_meta = get_meta(base_addr, last_meta_offset);
+	if(current->head->offset != -1 ){
+		checkpoint_t *last_meta = get_meta(base_addr, current->head->offset);
 		start_addr = get_start_addr(base_addr, last_meta);
-		chkpt.prv_offset = last_meta_offset;
+		chkpt.prv_offset = current->head->offset;
 		chkpt.offset = last_meta->offset + sizeof(checkpoint_t)+last_meta->data_size;
 	}else{
 		start_addr = current->meta;
@@ -237,14 +250,18 @@ void print_data(checkpoint_t *chkptr){
 int main(int argc, char *argv[]){
 	printf("Checkpoint testing...\n");
 	char *var_name = "my_var";
-	char *my_var = alloc(100,var_name, 1, 100);
+	char *my_var = alloc(100,var_name, 3,1, 100);
 	my_var = "Hello world checkpoint";
 	char *var_name2 = "my_var2";
-	char *my_var2 = alloc(50,var_name, 2, 50);
-	my_var = "the Alternate content";
+	char *my_var2 = alloc(50,var_name, 4,1, 50);
+	my_var2 = "the Alternate content";
 	chkpt_all();	
 	checkpoint_t *meta = get_latest_version(2);
-	print_data(meta);
+	if(meta){
+		print_data(meta);
+	}else{
+		printf("data not found\n");
+	}
 	return 0;
 }
 
