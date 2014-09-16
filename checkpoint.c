@@ -28,6 +28,7 @@ struct entry {
     void *ptr;
 	size_t size;
 	int id;
+	char *var_name;
 	int process_id;
 	int version;
     LIST_ENTRY(entry) entries;
@@ -95,7 +96,7 @@ memmap_t *get_latest_mapfile(memmap_t *m1,memmap_t *m2){
 }
 
 int initialized = 0;
-void *alloc(size_t size, char *var, int id, int process_id, size_t commit_size){
+void *alloc(size_t size, char *var_name, int process_id, size_t commit_size){
 	pthread_mutex_lock(&mtx);
 	//init calls happens once
 	if(!initialized){	
@@ -105,7 +106,7 @@ void *alloc(size_t size, char *var, int id, int process_id, size_t commit_size){
 	struct entry *n = malloc(sizeof(struct entry)); // new node in list
 	n->ptr = malloc(size); // allocating memory for incoming request
 	n->size = size;
-	n->id = id;
+	n->var_name = var_name;
 	n->process_id = process_id;
 	n->version = 0;
 	LIST_INSERT_HEAD(&head, n, entries);
@@ -128,24 +129,25 @@ int is_chkpoint_present(){
 }
 
 
-extern checkpoint_t *get_latest_version(int id, int process_id){
+extern checkpoint_t *get_latest_version(char *var_name, int process_id){
 	checkpoint_t *result;
 	memmap_t *other;
-	if((result = get_latest_version1(current, id, process_id)) == NULL){
+	if((result = get_latest_version1(current, var_name, process_id)) == NULL){
 		//if result not found in the current mem map file, then switch the files
 		// and do search again
 		printf("Not found in the current memory mapped file. Searching the other...\n");
 		other = (current == &m[0])?&m[1]:&m[0];	
-		result = get_latest_version1(other, id, process_id);	
+		result = get_latest_version1(other, var_name, process_id);	
 	}
 	return result;	
 }
 
-checkpoint_t *get_latest_version1(memmap_t *mmap, int id, int process_id){
+checkpoint_t *get_latest_version1(memmap_t *mmap, char *var_name, int process_id){
 	int temp_offset = mmap->head->offset;
+	int str_cmp;
 	while(temp_offset >= 0){
 		checkpoint_t *ptr = get_meta(mmap->meta,temp_offset);
-		if((ptr->id == id) && (ptr->process_id == process_id)){
+		if((ptr->process_id == process_id) && (str_cmp=strncmp(ptr->var_name,var_name,9))==0){ // last char is null terminator
 			return ptr;
 		}
 		temp_offset = ptr->prv_offset;
@@ -177,7 +179,7 @@ extern void chkpt_all(){
 	}
 	struct entry *np;
 	for (np = head.lh_first; np != NULL; np = np->entries.le_next){
-		checkpoint(np->id, np->process_id, np->version,	np->size,np->ptr);
+		checkpoint(np->var_name, np->process_id, np->version,	np->size,np->ptr);
 	}	
 	pthread_mutex_unlock(&mtx);
 	return;
@@ -187,15 +189,16 @@ extern void chkpt_all(){
 	try checkpointing to current mem map file if space is not enough
 	switch to next mem map file and do checkpointing.
 */
-extern void checkpoint(int id, int process_id, int version, size_t size, void *data){
-	checkpoint2(current->meta,id, process_id, version,size,data);
+extern void checkpoint(char *var_name, int process_id, int version, size_t size, void *data){
+	checkpoint2(current->meta,var_name, process_id, version,size,data);
 	return;	
 }
 
-void checkpoint2(void *base_addr, int id, int process_id, int version, size_t size, void *data){
+void checkpoint2(void *base_addr, char *var_name, int process_id, int version, size_t size, void *data){
 	checkpoint_t chkpt;
 	void *start_addr;
-	chkpt.id = id;
+	strncpy(chkpt.var_name,var_name,sizeof(chkpt.var_name)-1);
+	chkpt.var_name[9] = '\0'; // null terminating
 	chkpt.process_id = process_id;
 	chkpt.version = version;
 	chkpt.data_size = size;

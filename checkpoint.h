@@ -7,7 +7,8 @@ typedef enum { false, true } bool;
 // meta data structure used during data persistance
 // id + version defines a unique structure.
 typedef struct checkpoint{
-	int id;
+	char var_name[10];
+	//int id;
 	int process_id;
 	int version;
 	bool is_valid;
@@ -34,10 +35,10 @@ int is_chkpoint_present();
 void map_memory_file();
 void init();
 checkpoint_t *get_meta(void *base_addr,size_t offset);
-checkpoint_t *get_latest_version(int id, int process_id);
-checkpoint_t *get_latest_version1(memmap_t *mmap, int id, int process_id);
-void checkpoint(int id,int process_id, int version, size_t size, void *data);
-void checkpoint2(void *base_addr, int id, int process_id, int version, size_t size, void *data);
+checkpoint_t *get_latest_version(char *var_name, int process_id);
+checkpoint_t *get_latest_version1(memmap_t *mmap, char *var_name, int process_id);
+void checkpoint(char *var_name,int process_id, int version, size_t size, void *data);
+void checkpoint2(void *base_addr, char *var_name, int process_id, int version, size_t size, void *data);
 void checkpoint1(void *start_addr, checkpoint_t *chkpt, void *data);
 void *get_start_addr(void *base_addr,checkpoint_t *last_meta);
 void *get_data_addr(void *base_addr, checkpoint_t *chkptr);
