@@ -20,7 +20,17 @@
 memmap_t m[2];
 memmap_t *current;
 int offset;
-
+LIST_HEAD(listhead, entry) head=
+	LIST_HEAD_INITIALIZER(head);
+struct listhead *headp;                 
+struct entry {
+    void *ptr;
+	size_t size;
+	int id;
+	int process_id;
+	int version;
+    LIST_ENTRY(entry) entries;
+};
 /*
 create the initial memory mapped file structure for the first time
 and initialize the meta structure.
@@ -236,7 +246,7 @@ int get_new_offset(int offset, size_t data_size){
 	int temp = offset + sizeof(checkpoint_t) + data_size; 
 	return temp; 
 }
-
+/*
 void print_data(checkpoint_t *chkptr){
 	printf("id : %d\n", chkptr->id);
 	printf("version : %d\n", chkptr->version);
@@ -264,5 +274,6 @@ int main(int argc, char *argv[]){
 	}
 	return 0;
 }
+*/
 
 

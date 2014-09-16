@@ -29,17 +29,6 @@ typedef struct memmap{
 	int fd;
 }memmap_t;
 
-LIST_HEAD(listhead, entry) head=
-	LIST_HEAD_INITIALIZER(head);
-struct listhead *headp;                 
-struct entry {
-    void *ptr;
-	size_t size;
-	int id;
-	int process_id;
-	int version;
-    LIST_ENTRY(entry) entries;
-};
 
 int is_chkpoint_present();
 void map_memory_file();
