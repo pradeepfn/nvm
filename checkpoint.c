@@ -128,24 +128,24 @@ int is_chkpoint_present(){
 }
 
 
-extern checkpoint_t *get_latest_version(int id){
+extern checkpoint_t *get_latest_version(int id, int process_id){
 	checkpoint_t *result;
 	memmap_t *other;
-	if((result = get_latest_version1(current, id)) == NULL){
+	if((result = get_latest_version1(current, id, process_id)) == NULL){
 		//if result not found in the current mem map file, then switch the files
 		// and do search again
 		printf("Not found in the current memory mapped file. Searching the other...\n");
 		other = (current == &m[0])?&m[1]:&m[0];	
-		result = get_latest_version1(other, id);	
+		result = get_latest_version1(other, id, process_id);	
 	}
 	return result;	
 }
 
-checkpoint_t *get_latest_version1(memmap_t *mmap, int id){
+checkpoint_t *get_latest_version1(memmap_t *mmap, int id, int process_id){
 	int temp_offset = mmap->head->offset;
 	while(temp_offset >= 0){
 		checkpoint_t *ptr = get_meta(mmap->meta,temp_offset);
-		if((ptr->id) == id){
+		if((ptr->id == id) && (ptr->process_id == process_id)){
 			return ptr;
 		}
 		temp_offset = ptr->prv_offset;
