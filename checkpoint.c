@@ -8,6 +8,7 @@
 #include <sys/queue.h>
 #include <unistd.h>
 #include <assert.h>
+#include <pthread.h>
 #include "checkpoint.h"
 #include "utils.h"
 
@@ -16,7 +17,7 @@
 #define FILE_PATH_TWO "mmap.file.two"
 #define FILE_SIZE 300
 /*#define FILE_SIZE 500000000*/
-
+pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
 memmap_t m[2];
 memmap_t *current;
 int offset;
@@ -95,19 +96,21 @@ memmap_t *get_latest_mapfile(memmap_t *m1,memmap_t *m2){
 
 int initialized = 0;
 void *alloc(size_t size, char *var, int id, int process_id, size_t commit_size){
+	pthread_mutex_lock(&mtx);
 	//init calls happens once
 	if(!initialized){	
 		init();
 		initialized = 1;
 	}
-		struct entry *n = malloc(sizeof(struct entry)); // new node in list
-		n->ptr = malloc(size); // allocating memory for incoming request
-		n->size = size;
-		n->id = id;
-		n->process_id = process_id;
-		n->version = 0;
-		LIST_INSERT_HEAD(&head, n, entries);
-		return n->ptr;
+	struct entry *n = malloc(sizeof(struct entry)); // new node in list
+	n->ptr = malloc(size); // allocating memory for incoming request
+	n->size = size;
+	n->id = id;
+	n->process_id = process_id;
+	n->version = 0;
+	LIST_INSERT_HEAD(&head, n, entries);
+	pthread_mutex_unlock(&mtx);
+	return n->ptr;
 
 }
 
@@ -162,6 +165,7 @@ int is_remaining_space_enough(){
 
 
 extern void chkpt_all(){
+	pthread_mutex_lock(&mtx);
 	if(!is_remaining_space_enough()){
 		printf("remaining space is not enough. Switching to other file....\n");
 		//swap the persistant memory if not enough space
@@ -175,6 +179,7 @@ extern void chkpt_all(){
 	for (np = head.lh_first; np != NULL; np = np->entries.le_next){
 		checkpoint(np->id, np->process_id, np->version,	np->size,np->ptr);
 	}	
+	pthread_mutex_unlock(&mtx);
 	return;
 }
 
